@@ -4,18 +4,104 @@
 <meta charset="UTF-8">
 <title>Интеграторы инфобеза</title>
 <style>
-body { font-family: Arial; padding: 20px; }
-table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-th, td { border: 1px solid #ccc; padding: 8px; }
-th { background-color: #f0f0f0; }
-input, button { padding: 5px; margin: 2px 0; }
-.admin { margin-top: 20px; border: 1px solid #aaa; padding: 10px; background: #f9f9f9; display:none; }
-#adminAccess { margin-top:20px; }
+/* Общие стили */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f7f8fc;
+    margin: 0;
+    padding: 20px;
+    color: #333;
+}
+
+h1, h2, h3 {
+    text-align: center;
+    color: #222;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+}
+
+/* Таблица */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    background: #fff;
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+}
+
+th {
+    background-color: #4CAF50;
+    color: white;
+}
+
+tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+
+/* Кнопки */
+button {
+    padding: 10px 20px;
+    margin: 5px 0;
+    border: none;
+    border-radius: 6px;
+    background-color: #4CAF50;
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+/* Поля ввода */
+input[type=text], input[type=password] {
+    padding: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 5px 0 15px 0;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+/* Админ-панель */
+.admin, #adminLogin {
+    background: #fff;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* Кнопка доступа к админ-панели */
+#showAdminBtn {
+    display: block;
+    margin: 20px auto;
+}
+
+/* Скрытые элементы */
+.admin { display: none; }
+#adminLogin { display: none; }
+
+/* Подписи */
+label {
+    font-weight: bold;
+}
 </style>
 </head>
 <body>
 
-<h1>Список интеграторов</h1>
+<div class="container">
+<h1>Интеграторы в сфере инфобезопасности</h1>
 
 <table id="integratorTable">
 <thead>
@@ -26,8 +112,11 @@ input, button { padding: 5px; margin: 2px 0; }
 
 <div id="adminAccess">
 <button id="showAdminBtn">Доступ к админ-панели</button>
-<div id="adminLogin" style="display:none; margin-top:10px;">
-<label>Пароль: <input type="password" id="adminPassLogin"></label>
+
+<div id="adminLogin">
+<h2>Авторизация администратора</h2>
+<label>Пароль:</label>
+<input type="password" id="adminPassLogin" placeholder="Введите пароль">
 <button id="loginBtn">Войти</button>
 </div>
 </div>
@@ -36,18 +125,26 @@ input, button { padding: 5px; margin: 2px 0; }
 <h2>Админ-панель</h2>
 
 <h3>Добавить интегратора</h3>
-<label>Название: <input type="text" id="name"></label><br>
-<label>Город: <input type="text" id="city"></label><br>
-<label>Описание: <input type="text" id="desc"></label><br>
-<button id="addBtn">Добавить</button>
+<label>Название:</label>
+<input type="text" id="name" placeholder="Название интегратора">
+<label>Город:</label>
+<input type="text" id="city" placeholder="Город">
+<label>Описание:</label>
+<input type="text" id="desc" placeholder="Описание">
+<button id="addBtn">Добавить интегратора</button>
 
 <h3>Сменить пароль</h3>
-<label>Старый пароль: <input type="password" id="oldpass"></label><br>
-<label>Новый пароль: <input type="password" id="newpass"></label><br>
+<label>Старый пароль:</label>
+<input type="password" id="oldpass" placeholder="Старый пароль">
+<label>Новый пароль:</label>
+<input type="password" id="newpass" placeholder="Новый пароль">
 <button id="changePassBtn">Сменить пароль</button>
 </div>
 
+</div>
+
 <script>
+// Авторизация
 let adminAuthenticated = false;
 
 async function loadIntegrators() {
@@ -64,10 +161,12 @@ async function loadIntegrators() {
     } catch(err){ alert('Ошибка загрузки: '+err); }
 }
 
+// Кнопка "Доступ к админ-панели"
 document.getElementById('showAdminBtn').onclick = () => {
     document.getElementById('adminLogin').style.display = 'block';
 };
 
+// Вход админа
 document.getElementById('loginBtn').onclick = async () => {
     const pwd = document.getElementById('adminPassLogin').value.trim();
     if(!pwd){ alert('Введите пароль'); return; }
@@ -75,20 +174,18 @@ document.getElementById('loginBtn').onclick = async () => {
     try{
         const form = new URLSearchParams();
         form.append('admin', pwd);
-
         const res = await fetch('/admin_login', {method:'POST', body:form});
         if(res.status === 200){
             adminAuthenticated = true;
             alert('Авторизация успешна');
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('adminLogin').style.display = 'none';
-            loadIntegrators(); // обновим таблицу
+            loadIntegrators();
         } else {
             alert('Неверный пароль');
         }
     } catch(err){ alert('Ошибка: '+err); }
 };
-
 
 // Добавление интегратора
 document.getElementById('addBtn').onclick = async () => {
@@ -137,7 +234,7 @@ document.getElementById('changePassBtn').onclick = async () => {
     } catch(err){ alert('Ошибка: '+err); }
 };
 
-// загрузка таблицы при старте
+// Загрузка таблицы при старте
 window.onload = loadIntegrators;
 </script>
 
