@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Интеграторы инфобеза</title>
+<style>
+body { font-family: Arial; padding: 20px; }
+table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+th, td { border: 1px solid #ccc; padding: 8px; }
+th { background: #f0f0f0; }
+input, button { padding: 5px; margin: 2px 0; }
+.admin { margin-top: 20px; border: 1px solid #aaa; padding: 10px; background: #f9f9f9; }
+</style>
+</head>
+<body>
+
+<h1>Список интеграторов</h1>
+
+<table id="integratorTable">
+<thead>
+<tr><th>ID</th><th>Название</th><th>Город</th><th>Описание</th></tr>
+</thead>
+<tbody></tbody>
+</table>
+
+<div class="admin">
+<h2>Добавить интегратора (admin)</h2>
+<label>Пароль: <input type="password" id="adminPass"></label><br>
+<label>Название: <input type="text" id="name"></label><br>
+<label>Город: <input type="text" id="city"></label><br>
+<label>Описание: <input type="text" id="desc"></label><br>
+<button id="addBtn">Добавить</button>
+</div>
+
+<script>
+async function loadIntegrators() {
+    try {
+        const res = await fetch('/list');
+        const data = await res.json();
+        const tbody = document.querySelector('#integratorTable tbody');
+        tbody.innerHTML = '';
+        data.forEach(i => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${i.id}</td><td>${i.name}</td><td>${i.city}</td><td>${i.description}</td>`;
+            tbody.appendChild(tr);
+        });
+    } catch(err){ alert('Ошибка загрузки: '+err); }
+}
+
+document.getElementById('addBtn').onclick = async () => {
+    const name = document.getElementById('name').value.trim();
+    const city = document.getElementById('city').value.trim();
+    const desc = document.getElementById('desc').value.trim();
+    const admin = document.getElementById('adminPass').value.trim();
+
+    if(!name || !admin){ alert('Введите имя и пароль'); return; }
+
+    const form = new URLSearchParams();
+    form.append('name', name);
+    form.append('city', city);
+    form.append('description', desc);
+    form.append('admin', admin);
+
+    try {
+        const res = await fetch('/admin_add', { method: 'POST', body: form });
+        if(res.status != 200){ alert(await res.text()); return; }
+        alert('Добавлено!');
+        loadIntegrators();
+    } catch(err){ alert('Ошибка: '+err); }
+};
+
+window.onload = loadIntegrators;
+</script>
+
+</body>
+</html>
