@@ -25,6 +25,17 @@ void start_http_server(sqlite3 *db){
             res.set_content(buf.str(), "text/html; charset=utf-8");
         });
 
+            // Проверка пароля (логин)
+svr.Post("/admin_login", [db](const Request& req, Response &res){
+    auto admin = req.get_param_value("admin");
+    if(check_admin_password(db, admin)){
+        res.set_content("ok", "text/plain");
+    } else {
+        res.status = 403;
+        res.set_content("Forbidden: неверный пароль", "text/plain");
+    }
+});
+
         // REST API: список интеграторов
         svr.Get("/list", [db](const Request&, Response &res){
             auto list = list_integrators(db);
@@ -42,6 +53,33 @@ void start_http_server(sqlite3 *db){
             json << "]";
             res.set_content(json.str(), "application/json; charset=utf-8");
         });
+
+            // Смена пароля (POST)
+svr.Post("/admin_change_pass", [db](const Request& req, Response &res){
+    auto oldpass = req.get_param_value("oldpass");
+    auto newpass = req.get_param_value("newpass");
+
+    if(!check_admin_password(db, oldpass)){
+        res.status = 403;
+        res.set_content("Forbidden: старый пароль неверен", "text/plain");
+        return;
+    }
+
+    if(newpass.empty()){
+        res.status = 400;
+        res.set_content("Новый пароль не может быть пустым", "text/plain");
+        return;
+    }
+
+    try{
+        set_admin_password(db, newpass);
+        res.set_content("Пароль изменён", "text/plain");
+    } catch(std::exception &e){
+        res.status = 500;
+        res.set_content(std::string("Ошибка: ") + e.what(), "text/plain");
+    }
+});
+
 
         // Добавление интегратора (POST)
         svr.Post("/admin_add", [db](const Request& req, Response &res){
