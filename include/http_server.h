@@ -1,4 +1,4 @@
 #pragma once
-#include <sqlite3.h>
+#include "db.h"
 
-void start_http_server(sqlite3 *db);
+void start_http_server(Database& db);

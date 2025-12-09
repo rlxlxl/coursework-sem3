@@ -1,21 +1,44 @@
 #include "http_server.h"
-#include "db.h"
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <cstdio>
 
-#ifdef CPPHTTPLIB_HEADER_INCLUDE
-#include CPPHTTPLIB_HEADER_INCLUDE
+#include "httplib.h"
 using namespace httplib;
 
-void start_http_server(sqlite3 *db){
-    std::thread([db](){
+static std::string escape_json(const std::string& str) {
+    std::string result;
+    for (unsigned char c : str) {
+        switch (c) {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\b': result += "\\b"; break;
+            case '\f': result += "\\f"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:
+                if (c < 32) {
+                    char buf[7];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    result += buf;
+                } else {
+                    result += c;
+                }
+        }
+    }
+    return result;
+}
+
+void start_http_server(Database& db) {
+    std::thread([&db]() {
         Server svr;
 
-        // Отдать HTML
-        svr.Get("/", [](const Request&, Response &res){
+        // HTML
+        svr.Get("/", [](const Request&, Response& res) {
             std::ifstream file("web/index.html");
-            if(!file){
+            if (!file) {
                 res.status = 404;
                 res.set_content("index.html not found", "text/plain");
                 return;
@@ -25,94 +48,60 @@ void start_http_server(sqlite3 *db){
             res.set_content(buf.str(), "text/html; charset=utf-8");
         });
 
-            // Проверка пароля (логин)
-svr.Post("/admin_login", [db](const Request& req, Response &res){
-    auto admin = req.get_param_value("admin");
-    if(check_admin_password(db, admin)){
-        res.set_content("ok", "text/plain");
-    } else {
-        res.status = 403;
-        res.set_content("Forbidden: неверный пароль", "text/plain");
-    }
-});
-
-        // REST API: список интеграторов
-        svr.Get("/list", [db](const Request&, Response &res){
-            auto list = list_integrators(db);
+        // Получить список интеграторов
+        svr.Get("/list", [&db](const Request&, Response& res) {
+            auto list = db.get_integrators();
             std::ostringstream json;
             json << "[";
-            for(size_t i=0;i<list.size();++i){
-                const auto &it = list[i];
-                json << "{\"id\":" << it.id
-                     << ",\"name\":\"" << it.name
-                     << "\",\"city\":\"" << it.city
-                     << "\",\"description\":\"" << it.description
-                     << "\"}";
-                if(i + 1 != list.size()) json << ",";
+
+            for (size_t i = 0; i < list.size(); ++i) {
+                const auto& it = list[i];
+                json << "{"
+                     << "\"id\":" << it.id << ","
+                     << "\"name\":\"" << escape_json(it.name) << "\","
+                     << "\"city\":\"" << escape_json(it.city) << "\","
+                     << "\"activity\":\"" << escape_json(it.activity) << "\"}";
+                if (i + 1 < list.size()) json << ",";
             }
             json << "]";
             res.set_content(json.str(), "application/json; charset=utf-8");
         });
 
-            // Смена пароля (POST)
-svr.Post("/admin_change_pass", [db](const Request& req, Response &res){
-    auto oldpass = req.get_param_value("oldpass");
-    auto newpass = req.get_param_value("newpass");
-
-    if(!check_admin_password(db, oldpass)){
-        res.status = 403;
-        res.set_content("Forbidden: старый пароль неверен", "text/plain");
-        return;
-    }
-
-    if(newpass.empty()){
-        res.status = 400;
-        res.set_content("Новый пароль не может быть пустым", "text/plain");
-        return;
-    }
-
-    try{
-        set_admin_password(db, newpass);
-        res.set_content("Пароль изменён", "text/plain");
-    } catch(std::exception &e){
-        res.status = 500;
-        res.set_content(std::string("Ошибка: ") + e.what(), "text/plain");
-    }
-});
-
-
-        // Добавление интегратора (POST)
-        svr.Post("/admin_add", [db](const Request& req, Response &res){
-            auto name = req.get_param_value("name");
-            auto city = req.get_param_value("city");
-            auto description = req.get_param_value("description");
-            auto admin = req.get_param_value("admin");
-
-            if(!check_admin_password(db, admin)){
+        // Логин админа
+        svr.Post("/admin_login", [&db](const Request& req, Response& res) {
+            auto pass = req.get_param_value("admin");
+            if (db.check_admin_password(pass)) {
+                res.set_content("ok", "text/plain");
+            } else {
                 res.status = 403;
-                res.set_content("Forbidden: bad admin password", "text/plain");
+                res.set_content("bad password", "text/plain");
+            }
+        });
+
+        // Добавление интегратора
+        svr.Post("/admin_add", [&db](const Request& req, Response& res) {
+            if (!db.check_admin_password(req.get_param_value("admin"))) {
+                res.status = 403;
+                res.set_content("forbidden", "text/plain");
                 return;
             }
 
-            if(name.empty()){
+            int city_id = db.add_city(req.get_param_value("city"));
+            if (city_id < 0) {
                 res.status = 400;
-                res.set_content("Name is required", "text/plain");
+                res.set_content("city error", "text/plain");
                 return;
             }
 
-            try{
-                add_integrator(db, name, city, description);
-                res.set_content("Added", "text/plain");
-            } catch(std::exception &e){
-                res.status = 500;
-                res.set_content(std::string("Error: ") + e.what(), "text/plain");
-            }
+            db.add_integrator(
+                req.get_param_value("name"),
+                city_id,
+                req.get_param_value("activity")
+            );
+
+            res.set_content("added", "text/plain");
         });
 
         svr.listen("0.0.0.0", 8080);
     }).detach();
 }
-
-#else
-void start_http_server(sqlite3 *db){}
-#endif

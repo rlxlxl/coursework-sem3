@@ -1,0 +1,3 @@
+/Users/slavavikentev/Desktop/учеба/семестр 3/прога/curswork/build/CMakeFiles/app.dir
+/Users/slavavikentev/Desktop/учеба/семестр 3/прога/curswork/build/CMakeFiles/edit_cache.dir
+/Users/slavavikentev/Desktop/учеба/семестр 3/прога/curswork/build/CMakeFiles/rebuild_cache.dir

@@ -1,4 +1,4 @@
 #pragma once
-#include <sqlite3.h>
+#include "db.h"
 
-void console_loop(sqlite3 *db);
+void console_loop(Database& db);

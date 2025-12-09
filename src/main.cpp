@@ -1,36 +1,27 @@
 #include "db.h"
 #include "console.h"
-#include "util.h"
 #include "http_server.h"
-#include <iostream>
 #include <thread>
+#include <iostream>
 
 int main() {
-    // Открываем или создаём базу
-    sqlite3* db = open_db("integrators.db");
-    init_db(db);
+    Database db(
+      "host=localhost dbname=integrator_db user=postgres password=postgres"
+    );
 
-    // Если админ ещё не установлен, запрашиваем пароль
-    if(!has_admin(db)){
+    db.init();
+
+    if (!db.has_admin()) {
         std::string p;
-        std::cout << "Установите админ пароль: ";
+        std::cout << "Создайте админ пароль: ";
         std::cin >> p;
-        set_admin_password(db, p);
-        std::cout << "Админ пароль установлен.\n";
+        db.set_admin_password(p);
     }
 
-    // Запускаем веб-сервер в отдельном потоке
-    std::thread server_thread([db]() {
-        std::cout << "Запуск HTTP сервера на localhost:8080\n";
+    std::thread web([&](){
         start_http_server(db);
     });
 
-    // Главный поток остаётся для консоли
     console_loop(db);
-
-    // Ожидаем завершения сервера после выхода из консоли
-    server_thread.join();
-
-    sqlite3_close(db);
-    return 0;
+    web.join();
 }

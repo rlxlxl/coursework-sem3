@@ -1,185 +1,156 @@
 #include "db.h"
-#include "util.h"
-#include <iostream>
-#include <fstream>
+#include <stdexcept>
+#include <openssl/sha.h>
 #include <sstream>
-#include <algorithm>
-#include <cctype>
+#include <iomanip>
+#include <iostream>
 
-std::mutex db_mutex;
-static const char *ADMIN_KEY = "admin_password_hash";
+std::map<std::string, std::string> SqlLoader::queries;
 
-sqlite3* open_db(const char *filename){
-    sqlite3 *db = nullptr;
-    if(sqlite3_open(filename, &db)){
-        throw std::runtime_error("Can't open DB");
+int Database::add_city(const std::string& name) {
+    const char* values[] = {name.c_str()};
+    PGresult* r = PQexecParams(conn, SqlLoader::get("INSERT_CITY").c_str(),
+        1, NULL, values, NULL, NULL, 0);
+    
+    int city_id = -1;
+    if (PQresultStatus(r) == PGRES_TUPLES_OK && PQntuples(r) > 0) {
+        city_id = std::stoi(PQgetvalue(r, 0, 0));
+    } else {
+        std::cerr << "Insert city error: " << PQerrorMessage(conn) << std::endl;
     }
-    return db;
+    PQclear(r);
+    return city_id;
 }
 
-void exec_sql(sqlite3 *db, const std::string &sql){
-    char *err = nullptr;
-    std::lock_guard<std::mutex> lock(db_mutex);
-    int rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err);
-
-    if(rc != SQLITE_OK){
-        std::string msg = err ? err : "unknown";
-        sqlite3_free(err);
-        throw std::runtime_error("SQL error: " + msg);
+std::vector<City> Database::get_cities() {
+    PGresult* r = PQexec(conn, SqlLoader::get("SELECT_CITIES").c_str());
+    std::vector<City> v;
+    
+    for (int i = 0; i < PQntuples(r); i++) {
+        v.push_back({
+            std::stoi(PQgetvalue(r,i,0)),
+            PQgetvalue(r,i,1)
+        });
     }
-}
-
-void init_db(sqlite3 *db){
-    const char *sql =
-        "BEGIN;"
-        "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);"
-        "CREATE TABLE IF NOT EXISTS integrators ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "name TEXT,"
-        "city TEXT,"
-        "description TEXT"
-        ");"
-        "COMMIT;";
-    exec_sql(db, sql);
-}
-
-bool has_admin(sqlite3 *db){
-    std::lock_guard<std::mutex> lock(db_mutex);
-
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db, "SELECT value FROM kv WHERE key = ?;", -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, ADMIN_KEY, -1, SQLITE_STATIC);
-
-    bool found = false;
-    if(sqlite3_step(stmt) == SQLITE_ROW){
-        found = true;
-    }
-    sqlite3_finalize(stmt);
-    return found;
-}
-
-void set_admin_password(sqlite3 *db, const std::string &plain){
-    std::string h = simple_hash(plain);
-
-    std::lock_guard<std::mutex> lock(db_mutex);
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db,
-        "INSERT OR REPLACE INTO kv (key,value) VALUES(?,?);",
-        -1, &stmt, nullptr);
-
-    sqlite3_bind_text(stmt, 1, ADMIN_KEY, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, h.c_str(), -1, SQLITE_STATIC);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
-bool check_admin_password(sqlite3 *db, const std::string &plain){
-    std::string h = simple_hash(plain);
-
-    std::lock_guard<std::mutex> lock(db_mutex);
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db, "SELECT value FROM kv WHERE key=?;", -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, ADMIN_KEY, -1, SQLITE_STATIC);
-
-    bool ok = false;
-    if(sqlite3_step(stmt) == SQLITE_ROW){
-        const unsigned char *val = sqlite3_column_text(stmt, 0);
-        if(val && h == reinterpret_cast<const char*>(val))
-            ok = true;
-    }
-    sqlite3_finalize(stmt);
-    return ok;
-}
-
-std::vector<Integrator> list_integrators(sqlite3 *db){
-    std::vector<Integrator> v;
-    std::lock_guard<std::mutex> lock(db_mutex);
-    sqlite3_stmt *stmt;
-
-    sqlite3_prepare_v2(db,
-        "SELECT id,name,city,description FROM integrators ORDER BY id;",
-        -1, &stmt, nullptr);
-
-    while(sqlite3_step(stmt) == SQLITE_ROW){
-        Integrator it;
-        it.id = sqlite3_column_int(stmt, 0);
-        it.name = (const char*)sqlite3_column_text(stmt, 1);
-        it.city = (const char*)sqlite3_column_text(stmt, 2);
-        it.description = (const char*)sqlite3_column_text(stmt, 3);
-        v.push_back(it);
-    }
-    sqlite3_finalize(stmt);
+    PQclear(r);
     return v;
 }
 
-void add_integrator(sqlite3 *db, const std::string &name,
-                    const std::string &city, const std::string &desc){
-    std::lock_guard<std::mutex> lock(db_mutex);
-    sqlite3_stmt *stmt;
-
-    sqlite3_prepare_v2(db,
-        "INSERT INTO integrators(name,city,description) VALUES(?,?,?);",
-        -1, &stmt, nullptr);
-
-    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, city.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, desc.c_str(), -1, SQLITE_STATIC);
-
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
-void delete_integrator(sqlite3 *db, int id){
-    std::lock_guard<std::mutex> lock(db_mutex);
-    sqlite3_stmt *stmt;
-
-    sqlite3_prepare_v2(db,
-        "DELETE FROM integrators WHERE id=?;",
-        -1, &stmt, nullptr);
-
-    sqlite3_bind_int(stmt, 1, id);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
-// CSV IMPORT
-static std::vector<std::vector<std::string>> parse_csv(const std::string &path){
-    std::ifstream in(path);
-    if(!in) throw std::runtime_error("Cannot open CSV: " + path);
-
-    std::vector<std::vector<std::string>> rows;
-    std::string line;
-
-    while(std::getline(in, line)){
-        std::vector<std::string> cols;
-        std::string cur;
-        bool inq = false;
-
-        for(char c : line){
-            if(c == '"') inq = !inq;
-            else if(c == ',' && !inq){
-                cols.push_back(cur);
-                cur.clear();
-            } else cur.push_back(c);
-        }
-        cols.push_back(cur);
-
-        for(auto &c : cols){
-            while(!c.empty() && std::isspace((unsigned char)c.front())) c.erase(c.begin());
-            while(!c.empty() && std::isspace((unsigned char)c.back())) c.pop_back();
-        }
-        rows.push_back(cols);
+int Database::get_city_id(const std::string& name) {
+    const char* values[] = {name.c_str()};
+    PGresult* r = PQexecParams(conn,
+        SqlLoader::get("SELECT_CITY_BY_NAME").c_str(),
+        1, NULL, values, NULL, NULL, 0);
+    
+    int city_id = -1;
+    if (PQntuples(r) > 0) {
+        city_id = std::stoi(PQgetvalue(r, 0, 0));
     }
-    return rows;
+    PQclear(r);
+    return city_id;
 }
 
-void import_csv(sqlite3 *db, const std::string &path){
-    auto rows = parse_csv(path);
-    for(auto &r : rows){
-        if(r.empty()) continue;
-        std::string name = r.size() > 0 ? r[0] : "";
-        std::string city = r.size() > 1 ? r[1] : "";
-        std::string desc = r.size() > 2 ? r[2] : "";
-        if(!name.empty()) add_integrator(db, name, city, desc);
+static std::string sha256(const std::string& str) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)str.c_str(), str.size(), hash);
+    std::stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    return ss.str();
+}
+
+Database::Database(const std::string& conninfo) {
+    conn = PQconnectdb(conninfo.c_str());
+    if (PQstatus(conn) != CONNECTION_OK)
+        throw std::runtime_error(PQerrorMessage(conn));
+}
+
+Database::~Database() {
+    PQfinish(conn);
+}
+
+void Database::init() {
+    PGresult* r;
+    
+    r = PQexec(conn, SQL::CREATE_CITIES);
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Create cities error: " << PQerrorMessage(conn) << std::endl;
     }
+    PQclear(r);
+    
+    r = PQexec(conn, SQL::CREATE_INTEGRATORS);
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Create integrators error: " << PQerrorMessage(conn) << std::endl;
+    }
+    PQclear(r);
+    
+    r = PQexec(conn, SQL::CREATE_ADMIN);
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Create admin error: " << PQerrorMessage(conn) << std::endl;
+    }
+    PQclear(r);
+}
+
+bool Database::has_admin() {
+    PGresult* r = PQexec(conn, SqlLoader::get("SELECT_ADMIN_COUNT").c_str());
+    bool exists = PQntuples(r) > 0;
+    PQclear(r);
+    return exists;
+}
+
+void Database::set_admin_password(const std::string& password) {
+    std::string h = sha256(password);
+    PGresult* r = PQexec(conn, SqlLoader::get("DELETE_ADMIN").c_str());
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Delete error: " << PQerrorMessage(conn) << std::endl;
+    }
+    PQclear(r);
+    
+    const char* values[] = {h.c_str()};
+    r = PQexecParams(conn,
+        SqlLoader::get("INSERT_ADMIN").c_str(),
+        1, NULL, values, NULL, NULL, 0);
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Insert error: " << PQerrorMessage(conn) << std::endl;
+    }
+    PQclear(r);
+}
+
+bool Database::check_admin_password(const std::string& password) {
+    std::string h = sha256(password);
+    const char* values[] = {h.c_str()};
+    PGresult* r = PQexecParams(conn,
+        SqlLoader::get("SELECT_ADMIN_BY_PASSWORD").c_str(),
+        1, NULL, values, NULL, NULL, 0);
+    bool ok = PQntuples(r) > 0;
+    PQclear(r);
+    return ok;
+}
+
+void Database::add_integrator(const std::string& n, int city_id, const std::string& a) {
+    std::string city_id_str = std::to_string(city_id);
+    const char* values[] = {n.c_str(), city_id_str.c_str(), a.c_str()};
+    PGresult* r = PQexecParams(conn,
+        SqlLoader::get("INSERT_INTEGRATOR").c_str(),
+        3, NULL, values, NULL, NULL, 0);
+    if (PQresultStatus(r) != PGRES_COMMAND_OK) {
+        std::cerr << "Insert error: " << PQerrorMessage(conn) << std::endl;
+    }
+    PQclear(r);
+}
+
+std::vector<Integrator> Database::get_integrators() {
+    PGresult* r = PQexec(conn, SqlLoader::get("SELECT_INTEGRATORS").c_str());
+    std::vector<Integrator> v;
+
+    for (int i = 0; i < PQntuples(r); i++) {
+        v.push_back({
+            std::stoi(PQgetvalue(r,i,0)),
+            PQgetvalue(r,i,1),
+            PQgetvalue(r,i,2),
+            PQgetvalue(r,i,3)
+        });
+    }
+    PQclear(r);
+    return v;
 }

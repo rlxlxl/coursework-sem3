@@ -1,0 +1,1 @@
+/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/app.dir/src/main.cpp.o CMakeFiles/app.dir/src/db.cpp.o CMakeFiles/app.dir/src/console.cpp.o CMakeFiles/app.dir/src/http_server.cpp.o -o app  /opt/homebrew/lib/postgresql@14/libpq.dylib /opt/homebrew/Cellar/openssl@3/3.6.0/lib/libcrypto.dylib
